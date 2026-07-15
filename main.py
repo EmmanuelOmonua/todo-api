@@ -5,6 +5,10 @@ from pydantic import BaseModel, Field
 class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1)
 
+class TaskUpdate(BaseModel):
+    title: str = Field(None, min_length=1)
+    done: bool = Field(None)
+
 tasks = [
     {"id": 1, "title": "Learn FastAPI", "done": False},
     {"id": 2, "title": "Build a CRUD API", "done": False},
@@ -51,3 +55,27 @@ def create_task(task_input: TaskCreate):
     }
     tasks.append(new_task)
     return new_task
+
+@app.put("/tasks/{task_id}")
+def update_task(task_id: int, task_input: TaskUpdate):
+    for task in tasks:
+        if task["id"] == task_id:
+            # Only update fields if they were actually provided in the request
+            if task_input.title is not None:
+                task["title"] = task_input.title
+            if task_input.done is not None:
+                task["done"] = task_input.done
+            return task
+            
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+
+@app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_task(task_id: int):
+    global tasks
+    for i, task in enumerate(tasks):
+        if task["id"] == task_id:
+            tasks.pop(i)
+            return 
+            
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
