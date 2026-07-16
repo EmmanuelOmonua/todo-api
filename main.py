@@ -1,5 +1,7 @@
 # main.py
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import JSONResponse                         
+from fastapi.exceptions import RequestValidationError                
 from pydantic import BaseModel, Field
 
 class TaskCreate(BaseModel):
@@ -16,6 +18,13 @@ tasks = [
 ]
 
 app = FastAPI()
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={"error": "Invalid or missing task title"}
+    )
 
 @app.get("/")
 def read_root():
@@ -38,14 +47,13 @@ def get_task(task_id: int):
     for task in tasks:
         if task["id"] == task_id:
             return task
-    raise HTTPException(
+    return JSONResponse(
         status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Task {task_id} not found"
+        content={"error": f"Task {task_id} not found"}
     )
 
 @app.post("/tasks", status_code=status.HTTP_201_CREATED)
 def create_task(task_input: TaskCreate):
-    # Calculate the next free ID dynamically
     new_id = max([t["id"] for t in tasks]) + 1 if tasks else 1
 
     new_task = {
@@ -60,14 +68,16 @@ def create_task(task_input: TaskCreate):
 def update_task(task_id: int, task_input: TaskUpdate):
     for task in tasks:
         if task["id"] == task_id:
-            # Only update fields if they were actually provided in the request
             if task_input.title is not None:
                 task["title"] = task_input.title
             if task_input.done is not None:
                 task["done"] = task_input.done
             return task
             
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND, 
+        content={"error": f"Task {task_id} not found"}
+    )
 
 
 @app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -78,4 +88,7 @@ def delete_task(task_id: int):
             tasks.pop(i)
             return 
             
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND, 
+        content={"error": f"Task {task_id} not found"}
+    )
