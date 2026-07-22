@@ -1,3 +1,5 @@
+import sqlite3
+
 # main.py
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse                         
@@ -18,6 +20,37 @@ tasks = [
 ]
 
 app = FastAPI()
+
+conn = sqlite3.connect("tasks.db", check_same_thread=False)
+conn.row_factory = sqlite3.Row
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    done INTEGER NOT NULL
+)
+""")
+
+conn.commit()
+
+# Check how many rows are in the table
+cursor.execute("SELECT COUNT(*) FROM tasks")
+count = cursor.fetchone()[0]
+
+# Seed only if the table is empty
+if count == 0:
+    cursor.executemany("""
+        INSERT INTO tasks (title, done)
+        VALUES (?, ?)
+    """, [
+        ("Learn FastAPI", 0),
+        ("Build a CRUD API", 0),
+        ("Publish to GitHub", 0)
+    ])
+
+    conn.commit()
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
