@@ -109,41 +109,106 @@ def get_task(task_id: int):
 
 @app.post("/tasks", status_code=status.HTTP_201_CREATED)
 def create_task(task_input: TaskCreate):
-    new_id = max([t["id"] for t in tasks]) + 1 if tasks else 1
 
-    new_task = {
+    cursor.execute(
+        """
+        INSERT INTO tasks (title, done)
+        VALUES (?, ?)
+        """,
+        (task_input.title, 0)
+    )
+
+    conn.commit()
+
+    new_id = cursor.lastrowid
+
+    return {
         "id": new_id,
         "title": task_input.title,
         "done": False
     }
-    tasks.append(new_task)
-    return new_task
 
 @app.put("/tasks/{task_id}")
 def update_task(task_id: int, task_input: TaskUpdate):
-    for task in tasks:
-        if task["id"] == task_id:
-            if task_input.title is not None:
-                task["title"] = task_input.title
-            if task_input.done is not None:
-                task["done"] = task_input.done
-            return task
-            
-    return JSONResponse(
-        status_code=status.HTTP_404_NOT_FOUND, 
-        content={"error": f"Task {task_id} not found"}
+
+    cursor.execute(
+        "SELECT * FROM tasks WHERE id = ?",
+        (task_id,)
     )
+
+    row = cursor.fetchone()
+
+    if row is None:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"error": f"Task {task_id} not found"}
+        )
+
+    title = row["title"]
+    done = bool(row["done"])
+
+    if task_input.title is not None:
+        title = task_input.title
+
+    if task_input.done is not None:
+        done = task_input.done
+
+    cursor.execute(
+        """
+        UPDATE tasks
+        SET title = ?, done = ?
+        WHERE id = ?
+        """,
+        (title, int(done), task_id)
+    )
+
+    conn.commit()
+
+    return {
+        "id": task_id,
+        "title": title,
+        "done": done
+    }
 
 
 @app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_task(task_id: int):
-    global tasks
-    for i, task in enumerate(tasks):
-        if task["id"] == task_id:
-            tasks.pop(i)
-            return 
-            
-    return JSONResponse(
-        status_code=status.HTTP_404_NOT_FOUND, 
-        content={"error": f"Task {task_id} not found"}
+
+    cursor.execute(
+        "SELECT * FROM tasks WHERE id = ?",
+        (task_id,)
     )
+
+    if cursor.fetchone() is None:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"error": f"Task {task_id} not found"}
+        )
+
+    cursor.execute(
+        "DELETE FROM tasks WHERE id = ?",
+        (task_id,)
+    )
+
+    conn.commit()
+
+@app.post("/reset")
+def reset_tasks():
+
+    cursor.execute("DELETE FROM tasks")
+
+    cursor.executemany(
+        """
+        INSERT INTO tasks (title, done)
+        VALUES (?, ?)
+        """,
+        [
+            ("Learn FastAPI", 0),
+            ("Build a CRUD API", 0),
+            ("Publish to GitHub", 0),
+        ]
+    )
+
+    conn.commit()
+
+    return {"message": "Tasks reset successfully"}
