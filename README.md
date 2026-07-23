@@ -88,6 +88,22 @@ http://localhost:8000
 
 ---
 
+## Docker Setup (Stage 0)
+
+To spin up the PostgreSQL database in a Docker container with persistent volume storage, run:
+
+`docker run --name taskdb -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=tasks -p 5432:5432 -v taskdata:/var/lib/postgresql -d postgres`
+
+---
+
+### Verify Database Container
+
+You can inspect the running container and access the SQL prompt using `psql`:
+
+`docker exec -it taskdb psql -U postgres -d tasks`
+
+---
+
 ## API Documentation
 
 FastAPI automatically generates interactive documentation.
