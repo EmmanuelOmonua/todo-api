@@ -1,12 +1,13 @@
 # Task API
 
-A simple REST API built with **Python**, **FastAPI**, and **Uvicorn** for managing a to-do list. The API supports full CRUD operations and stores tasks in memory.
+A simple REST API built with **Python**, **FastAPI**, **SQLite**, and **Uvicorn** for managing a to-do list. The API supports full CRUD operations with persistent storage using SQLite, allowing task data to remain available after the server is restarted.
 
 ---
 
 ## Features
 
 - ✅ Create, Read, Update, and Delete tasks
+- ✅ Persistent storage using SQLite
 - ✅ Input validation for task titles
 - ✅ Health check endpoint
 - ✅ Interactive Swagger UI documentation
@@ -18,6 +19,8 @@ A simple REST API built with **Python**, **FastAPI**, and **Uvicorn** for managi
 
 - Python 3.x
 - FastAPI
+- SQLite
+- sqlite3
 - Uvicorn
 
 ---
@@ -68,7 +71,7 @@ source venv/bin/activate
 ### Install dependencies
 
 ```bash
-pip install fastapi uvicorn
+pip install -r requirements.txt
 ```
 
 ### Start the server
@@ -97,6 +100,21 @@ http://localhost:8000/docs
 
 ---
 
+## Database
+
+The API uses a SQLite database (`tasks.db`) for persistent storage.
+
+On first startup, the application automatically:
+
+- Creates the `tasks` table if it does not already exist.
+- Seeds the database with three example tasks if the table is empty.
+
+Because the API and SQLite database share the same database file, changes made through the API or directly in SQLite are immediately reflected without restarting the server.
+
+The database file (`tasks.db`) is created automatically the first time the application starts and is not committed to the repository.
+
+---
+
 ## Example Request
 
 ```bash
@@ -110,11 +128,16 @@ Example response:
   {
     "id": 1,
     "title": "Learn FastAPI",
-    "done": true
+    "done": false
+  },
+  {
+    "id": 2,
+    "title": "Build a CRUD API",
+    "done": false
   },
   {
     "id": 3,
-    "title": "Publish to Github",
+    "title": "Publish to GitHub",
     "done": false
   }
 ]
@@ -132,8 +155,9 @@ todo-api/
 │   ├── main.py
 │   └── requirements.txt
 ├── README.md
+├── requirements.txt
 ├── swagger-screenshot.png
-└── venv/
+└── .gitignore
 ```
 
 ---
@@ -141,6 +165,24 @@ todo-api/
 ## Screenshot
 
 ![Swagger UI](swagger-screenshot.png)
+
+---
+
+## SQLite Exploration
+
+During Stage 4, I explored the SQLite database directly using **DB Browser for SQLite**.
+
+### Example SQL Query
+
+```sql
+SELECT COUNT(*) FROM tasks;
+```
+
+### Result
+
+This query returned the total number of tasks stored in the database. I used it to verify the number of records in the `tasks` table before modifying the data through SQL.
+
+I also verified that changes made directly in the SQLite database were immediately reflected through the API without restarting the FastAPI server.
 
 ---
 
@@ -152,7 +194,7 @@ For the bonus stage, I wrote a prompt from memory and asked an AI assistant to b
 
 > From memory, I asked the AI to build a REST API for a simple to-do list using Python and FastAPI. The API should store tasks in memory only, support CRUD operations, include a health check endpoint, validate that task titles are not blank, return appropriate HTTP status codes, and generate Swagger documentation automatically. I also asked it to avoid using a database.
 
-**Running it:** I ran my Stage 4 checkpoint curls against the AI's version on port 8001. All of them returned the expected status codes and JSON — `404` with `{"error": ...}` for an unknown task, `400` with `{"error": ...}` for an empty POST body, `201` for a valid create.
+**Running it:** I ran the same API requests against the AI's version on port 8001, including creating a task, retrieving a task, updating a task, deleting a task, and testing invalid requests. The AI implementation returned the expected status codes and JSON responses, including `404` with `{"error": ...}` for an unknown task, `400` with `{"error": ...}` for an invalid POST request, and `201` for a successful task creation.
 
 **What it did better:**
 
