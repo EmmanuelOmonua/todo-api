@@ -102,7 +102,7 @@ http://localhost:8000/docs
 
 ## Database
 
-The API uses a SQLite database (`tasks.db`) for persistent storage.
+The API uses SQLite because it is a lightweight, serverless database stored in a single file (`tasks.db`). It requires zero database setup, is included with Python through the `sqlite3` module, and allows task data to survive application restarts.
 
 On first startup, the application automatically:
 
@@ -177,6 +177,10 @@ During Stage 4, I explored the SQLite database directly using **DB Browser for S
 ```sql
 SELECT COUNT(*) FROM tasks;
 ```
+
+## SQLite Database
+
+![SQLite Database](sqlite-browser.png)
 
 ### Result
 
