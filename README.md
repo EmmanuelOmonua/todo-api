@@ -92,7 +92,9 @@ http://localhost:8000
 
 To spin up the PostgreSQL database in a Docker container with persistent volume storage, run:
 
-`docker run --name taskdb -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=tasks -p 5432:5432 -v taskdata:/var/lib/postgresql -d postgres`
+```bash
+docker run --name taskdb -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=tasks -p 5432:5432 -v taskdata:/var/lib/postgresql -d postgres
+```
 
 ---
 

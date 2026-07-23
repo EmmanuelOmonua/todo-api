@@ -1,10 +1,16 @@
-import sqlite3
-
-# main.py
-from fastapi import FastAPI, HTTPException, status
-from fastapi.responses import JSONResponse                         
-from fastapi.exceptions import RequestValidationError                
+import os
+import psycopg
+from psycopg.rows import dict_row
+from fastapi import FastAPI, status
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:dev@localhost:5432/tasks")
 
 class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1)
@@ -13,44 +19,41 @@ class TaskUpdate(BaseModel):
     title: str = Field(None, min_length=1)
     done: bool = Field(None)
 
-tasks = [
-    {"id": 1, "title": "Learn FastAPI", "done": False},
-    {"id": 2, "title": "Build a CRUD API", "done": False},
-    {"id": 3, "title": "Publish to Github", "done": False},
-]
-
 app = FastAPI()
 
-conn = sqlite3.connect("tasks.db", check_same_thread=False)
-conn.row_factory = sqlite3.Row
-cursor = conn.cursor()
+def get_db_connection():
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    done INTEGER NOT NULL
-)
-""")
+def init_db():
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Create tasks table if it doesn't exist
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    done BOOLEAN NOT NULL DEFAULT FALSE
+                );
+            """)
+            
+            # Check row count
+            cur.execute("SELECT COUNT(*) FROM tasks;")
+            count = cur.fetchone()["count"]
+            
+            # Seed 3 tasks only if empty
+            if count == 0:
+                cur.executemany("""
+                    INSERT INTO tasks (title, done) VALUES (%s, %s);
+                """, [
+                    ("Learn FastAPI", False),
+                    ("Build a CRUD API", False),
+                    ("Publish to GitHub", False)
+                ])
+        conn.commit()
 
-conn.commit()
-
-# Check how many rows are in the table
-cursor.execute("SELECT COUNT(*) FROM tasks")
-count = cursor.fetchone()[0]
-
-# Seed only if the table is empty
-if count == 0:
-    cursor.executemany("""
-        INSERT INTO tasks (title, done)
-        VALUES (?, ?)
-    """, [
-        ("Learn FastAPI", 0),
-        ("Build a CRUD API", 0),
-        ("Publish to GitHub", 0)
-    ])
-
-    conn.commit()
+@app.on_event("startup")
+def startup_event():
+    init_db()
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
@@ -73,54 +76,36 @@ def health_check():
 
 @app.get("/tasks")
 def get_tasks():
-    cursor.execute("SELECT * FROM tasks")
-    rows = cursor.fetchall()
-
-    return [
-        {
-            "id": row["id"],
-            "title": row["title"],
-            "done": bool(row["done"])
-        }
-        for row in rows
-    ]
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, title, done FROM tasks ORDER BY id ASC;")
+            return cur.fetchall()
 
 @app.get("/tasks/{task_id}")
 def get_task(task_id: int):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, title, done FROM tasks WHERE id = %s;", (task_id,))
+            row = cur.fetchone()
 
-    cursor.execute(
-        "SELECT * FROM tasks WHERE id = ?",
-        (task_id,)
-    )
+            if row is None:
+                return JSONResponse(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    content={"error": f"Task {task_id} not found"}
+                )
 
-    row = cursor.fetchone()
-
-    if row is None:
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content={"error": f"Task {task_id} not found"}
-        )
-
-    return {
-        "id": row["id"],
-        "title": row["title"],
-        "done": bool(row["done"])
-    }
+            return row
 
 @app.post("/tasks", status_code=status.HTTP_201_CREATED)
 def create_task(task_input: TaskCreate):
-
-    cursor.execute(
-        """
-        INSERT INTO tasks (title, done)
-        VALUES (?, ?)
-        """,
-        (task_input.title, 0)
-    )
-
-    conn.commit()
-
-    new_id = cursor.lastrowid
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO tasks (title, done) VALUES (%s, %s) RETURNING id;",
+                (task_input.title, False)
+            )
+            new_id = cur.fetchone()["id"]
+        conn.commit()
 
     return {
         "id": new_id,
@@ -130,39 +115,31 @@ def create_task(task_input: TaskCreate):
 
 @app.put("/tasks/{task_id}")
 def update_task(task_id: int, task_input: TaskUpdate):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, title, done FROM tasks WHERE id = %s;", (task_id,))
+            row = cur.fetchone()
 
-    cursor.execute(
-        "SELECT * FROM tasks WHERE id = ?",
-        (task_id,)
-    )
+            if row is None:
+                return JSONResponse(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    content={"error": f"Task {task_id} not found"}
+                )
 
-    row = cursor.fetchone()
+            title = row["title"]
+            done = row["done"]
 
-    if row is None:
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content={"error": f"Task {task_id} not found"}
-        )
+            if task_input.title is not None:
+                title = task_input.title
 
-    title = row["title"]
-    done = bool(row["done"])
+            if task_input.done is not None:
+                done = task_input.done
 
-    if task_input.title is not None:
-        title = task_input.title
-
-    if task_input.done is not None:
-        done = task_input.done
-
-    cursor.execute(
-        """
-        UPDATE tasks
-        SET title = ?, done = ?
-        WHERE id = ?
-        """,
-        (title, int(done), task_id)
-    )
-
-    conn.commit()
+            cur.execute(
+                "UPDATE tasks SET title = %s, done = %s WHERE id = %s;",
+                (title, done, task_id)
+            )
+        conn.commit()
 
     return {
         "id": task_id,
@@ -170,45 +147,33 @@ def update_task(task_id: int, task_input: TaskUpdate):
         "done": done
     }
 
-
 @app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_task(task_id: int):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM tasks WHERE id = %s;", (task_id,))
+            if cur.fetchone() is None:
+                return JSONResponse(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    content={"error": f"Task {task_id} not found"}
+                )
 
-    cursor.execute(
-        "SELECT * FROM tasks WHERE id = ?",
-        (task_id,)
-    )
-
-    if cursor.fetchone() is None:
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content={"error": f"Task {task_id} not found"}
-        )
-
-    cursor.execute(
-        "DELETE FROM tasks WHERE id = ?",
-        (task_id,)
-    )
-
-    conn.commit()
+            cur.execute("DELETE FROM tasks WHERE id = %s;", (task_id,))
+        conn.commit()
 
 @app.post("/reset")
 def reset_tasks():
-
-    cursor.execute("DELETE FROM tasks")
-
-    cursor.executemany(
-        """
-        INSERT INTO tasks (title, done)
-        VALUES (?, ?)
-        """,
-        [
-            ("Learn FastAPI", 0),
-            ("Build a CRUD API", 0),
-            ("Publish to GitHub", 0),
-        ]
-    )
-
-    conn.commit()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("TRUNCATE TABLE tasks RESTART IDENTITY;")
+            cur.executemany(
+                "INSERT INTO tasks (title, done) VALUES (%s, %s);",
+                [
+                    ("Learn FastAPI", False),
+                    ("Build a CRUD API", False),
+                    ("Publish to GitHub", False),
+                ]
+            )
+        conn.commit()
 
     return {"message": "Tasks reset successfully"}
