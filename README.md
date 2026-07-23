@@ -192,34 +192,34 @@ I also verified that changes made directly in the SQLite database were immediate
 
 ## AI vs me
 
-For the bonus stage, I wrote a prompt from memory and asked an AI assistant to build the same API. The AI's code lives in `ai-version/main.py`, untouched from what it generated, so it can be compared against my hand-built version above.
+For Stage 6, I asked Claude to migrate my original in-memory FastAPI task API to use SQLite while keeping the API behavior the same. I placed the AI-generated version in the `ai-version/main.py` folder so it could be compared with my hand-written implementation.
 
 **My prompt:**
 
-> From memory, I asked the AI to build a REST API for a simple to-do list using Python and FastAPI. The API should store tasks in memory only, support CRUD operations, include a health check endpoint, validate that task titles are not blank, return appropriate HTTP status codes, and generate Swagger documentation automatically. I also asked it to avoid using a database.
+> Convert my existing FastAPI task API from using an in-memory Python list to using SQLite. Use Python's built-in `sqlite3` module. Create a `tasks` table with `id`, `title`, and `done` columns if it doesn't exist, and seed three example tasks only if the table is empty. Keep the same CRUD endpoints and preserve the existing API behavior, including the same HTTP status codes (`201`, `200`, `204`, `400`, `404`) and JSON error responses. Use parameterized SQL queries (? placeholders) for safety. Store task data in `tasks.db` so it survives server restarts.
 
-**Running it:** I ran the same API requests against the AI's version on port 8001, including creating a task, retrieving a task, updating a task, deleting a task, and testing invalid requests. The AI implementation returned the expected status codes and JSON responses, including `404` with `{"error": ...}` for an unknown task, `400` with `{"error": ...}` for an invalid POST request, and `201` for a successful task creation.
+**Running it:** The generated application started successfully, automatically created `tasks.db`, seeded the database only once, and preserved data after restarting the server. I tested all CRUD endpoints and confirmed that task creation, retrieval, updating, deletion, and persistence behaved correctly.
 
 **What it did better:**
 
-- Used a single global exception handler (`@app.exception_handler(HTTPException)`) so every route that raises `HTTPException` automatically gets formatted as `{"error": ...}`, instead of repeating a `JSONResponse` block in every route like I did.
-- Gave each validation error a specific message (e.g. `"title is required and cannot be empty"`) rather than one generic message for every failure.
-- Added `summary=` text to each endpoint, which shows up in Swagger UI.
-- Added extra endpoints I didn't ask for: `/stats`, `/reset`, and `?done=`/`?search=` filtering on `/tasks`.
+- It created helper functions (`get_conn()`, `init_db()`, and `row_to_task()`) that made the database code cleaner and easier to maintain.
+- It consistently used parameterized SQL queries, improving readability and preventing SQL injection.
+- It converted the SQLite integer values (`0` and `1`) into Python booleans before returning JSON responses, keeping the API output clean.
+- During the rematch, Claude improved the implementation by using a single shared SQLite connection protected by a thread lock instead of opening and closing a database connection for every request. This reduced repeated connection overhead while remaining thread-safe.
 
 **What it got wrong or quietly ignored:**
 
-- It matched the `{"error": ...}` response format on the first try, so I didn't need to change my prompt for that requirement.
-- It tracks new task IDs with a `next_id` counter that only ever increases, while I recompute `max(id) + 1` each time. My prompt never specified how IDs should behave after a task is deleted, so we ended up with different implementations.
-- It added extra functionality that I didn't ask for, including `/stats`, `/reset`, and filtering tasks with `?done=` and `?search=`. These features work well, but they weren't part of the assignment requirements.
+- It preserved additional endpoints from the original AI version (`/stats`, `/reset`, and task filtering), even though they were not required by the assignment specification.
+- It seeded different example tasks ("Buy milk" and "Write README") instead of matching the sample data from my project.
+- It did not generate a `requirements.txt` file even though the original AI project included one.
 
 **What my prompt forgot to specify:**
 
-- My prompt focused on the required functionality but didn't specify every implementation detail. It didn't mention how task IDs should be generated after deletions, whether additional helper endpoints should be included, or whether filtering tasks should be supported. Because of that, the AI made its own design choices in those areas.
+- My prompt described the required SQLite migration but did not specify how database connections should be managed, whether helper functions should be created, or whether the original sample tasks needed to remain exactly the same. Because those details were omitted, Claude made its own implementation decisions.
 
 **One rematch:**
 
-After comparing the AI's solution with my own, I updated my prompt to explicitly state that only the required assignment endpoints should be implemented. The regenerated version removed the extra helper endpoints and more closely matched the assignment specification.
+After reviewing the generated code, I refined my prompt to request a single shared SQLite connection instead of opening and closing a connection for every request. The regenerated version replaced the repeated connection logic with one shared connection protected by a thread lock, producing cleaner and more efficient database access.
 
 ---
 
