@@ -84,7 +84,7 @@ def read_root():
     return {
         "name": "Task API",
         "version": "1.0",
-        "endpoints": ["/tasks"]
+        "endpoints": ["/tasks", "/health"]
     }
 
 @app.get("/health")
@@ -93,11 +93,15 @@ def health_check():
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT 1;")
-        return {"status": "ok", "database": "connected"}
-    except Exception:
+        return {"status": "ok", "database": "ok"}
+    except Exception as e:
         return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"status": "error", "database": "disconnected"}
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "status": "error",
+                "database": "unreachable",
+                "detail": str(e)
+            }
         )
 
 @app.get("/tasks")
