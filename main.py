@@ -1,11 +1,14 @@
 import os
 import sys
+from typing import Optional
+from contextlib import asynccontextmanager
+
 import psycopg
 from psycopg.rows import dict_row
-from fastapi import FastAPI, status
+from fastapi import FastAPI, status, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -32,10 +35,19 @@ class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1)
 
 class TaskUpdate(BaseModel):
-    title: str = Field(None, min_length=1)
-    done: bool = Field(None)
+    title: Optional[str] = Field(None, min_length=1)
+    done: Optional[bool] = None
 
-app = FastAPI(title="Todo API with Supabase Auth")
+class UserAuth(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=6)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+app = FastAPI(title="Todo API with Supabase Auth", lifespan=lifespan)
 
 def get_db_connection():
     # Will raise psycopg.OperationalError if database is unreachable
@@ -217,3 +229,60 @@ def reset_tasks():
         conn.commit()
 
     return {"message": "Tasks reset successfully"}
+
+@app.post("/auth/signup", status_code=status.HTTP_201_CREATED)
+def signup(credentials: UserAuth):
+    try:
+        response = supabase.auth.sign_up({
+            "email": credentials.email,
+            "password": credentials.password,
+        })
+        if not response.user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Signup failed"
+            )
+        return {
+            "message": "User registered successfully",
+            "user_id": response.user.id,
+            "email": response.user.email
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+@app.post("/auth/login")
+def login(credentials: UserAuth):
+    try:
+        response = supabase.auth.sign_in_with_password({
+            "email": credentials.email,
+            "password": credentials.password,
+        })
+        if not response.session:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials"
+            )
+        return {
+            "access_token": response.session.access_token,
+            "refresh_token": response.session.refresh_token,
+            "token_type": "bearer"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password"
+        )
+
+@app.post("/auth/logout")
+def logout():
+    try:
+        supabase.auth.sign_out()
+        return {"message": "Successfully logged out"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
