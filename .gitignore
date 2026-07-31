@@ -1,6 +1,7 @@
 venv/
 __pycache__/
 *.pyc
+*.png
 tasks.db
 *.db
 .env

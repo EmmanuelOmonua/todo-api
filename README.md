@@ -15,6 +15,9 @@ A simple REST API built with **Python**, **FastAPI**, **PostgreSQL**, **Docker**
 - ✅ Health check endpoint that verifies database connectivity
 - ✅ Interactive Swagger UI documentation
 - ✅ FastAPI automatic OpenAPI documentation
+- ✅ User signup and login integration using Supabase Auth
+- ✅ JWT bearer token middleware protecting tasks and profile routes
+- ✅ User isolation ensuring users only see their own tasks
 
 ---
 
@@ -24,6 +27,7 @@ A simple REST API built with **Python**, **FastAPI**, **PostgreSQL**, **Docker**
 - FastAPI
 - PostgreSQL
 - psycopg (PostgreSQL driver)
+- Supabase Auth & PyJWT
 - Docker & Docker Compose
 - Uvicorn
 
@@ -34,13 +38,17 @@ A simple REST API built with **Python**, **FastAPI**, **PostgreSQL**, **Docker**
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/` | API information |
-| GET | `/health` | Health check (verifies the API can reach the database) |
-| GET | `/tasks` | List all tasks |
+| POST | `/auth/signup` | Register a new user account |
+| POST | `/auth/login` | Log in and receive JWT access token |
+| POST | `/auth/logout` | Log out current session |
+| GET | `/protected/profile` | Retrieve current authenticated user metadata |
+| GET | `/health` | Health check (verifies database connectivity) |
+| GET | `/tasks` | List all tasks for the logged-in user |
 | GET | `/tasks/{id}` | Retrieve a task by ID |
-| POST | `/tasks` | Create a task |
+| POST | `/tasks` | Create a task assigned to current user |
 | PUT | `/tasks/{id}` | Update a task |
 | DELETE | `/tasks/{id}` | Delete a task |
-| POST | `/reset` | Wipe all tasks and re-seed the three example tasks |
+| POST | `/reset` | Wipe all tasks and re-seed example tasks |
 
 ---
 
@@ -82,6 +90,9 @@ The app reads its database connection string from a `DATABASE_URL` environment v
 
 ```
 DATABASE_URL=postgres://postgres:dev@localhost:5432/tasks
+SUPABASE_URL=https://your-supabase-project.supabase.co
+SUPABASE_KEY=your-supabase-anon-key
+SUPABASE_JWT_SECRET=your-supabase-jwt-secret
 ```
 
 Note: when running via `docker compose up`, the `api` service is actually given its own `DATABASE_URL` directly in `compose.yaml` (pointing at hostname `db`, the Postgres service name inside Docker's internal network) — Docker Compose containers reach each other by service name, not `localhost`. The `.env` file's `localhost` version is what you'd use if running `main.py` directly on your machine (outside Docker) against a Postgres container whose port is published to `localhost:5432`.
@@ -251,7 +262,7 @@ todo-api/
 │   └── requirements.txt
 ├── README.md
 ├── requirements.txt
-├── swagger-screenshot.png
+├── swagger.png
 ├── sqlite-browser.png
 ├── postgres-data-screenshot.png   # add: screenshot of Stage 5 psql/GUI output
 └── .gitignore
@@ -263,7 +274,7 @@ todo-api/
 
 ## Screenshot
 
-![Swagger UI](swagger-screenshot.png)
+![Swagger UI](swagger.png)
 
 ### Database contents (Stage 5)
 
