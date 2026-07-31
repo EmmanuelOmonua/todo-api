@@ -84,7 +84,12 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(init_db)
     yield
 
-app = FastAPI(title="Todo API - Stage 4", lifespan=lifespan)
+app = FastAPI(
+    title="Todo API with Supabase Auth",
+    description="Interactive REST API built with FastAPI, PostgreSQL, and Supabase JWT authentication.",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 @app.exception_handler(psycopg.OperationalError)
 async def db_exception_handler(request, exc):
