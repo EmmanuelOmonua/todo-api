@@ -4,6 +4,6 @@ __pycache__/
 tasks.db
 *.db
 .env
-.vscode/
+.vscode/    
 .idea/
 .DS_Store

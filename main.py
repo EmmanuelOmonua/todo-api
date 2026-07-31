@@ -7,16 +7,26 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+from supabase import create_client, Client
 
 # Load environment variables from .env
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-# Rule 1: Validate DATABASE_URL on startup
+# Validate required environment variables on startup
 if not DATABASE_URL:
     print("FATAL ERROR: DATABASE_URL environment variable is missing or empty.", file=sys.stderr)
     sys.exit(1)
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print("FATAL ERROR: SUPABASE_URL or SUPABASE_KEY environment variable is missing.", file=sys.stderr)
+    sys.exit(1)
+
+# Initialize Supabase client
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1)
@@ -25,7 +35,7 @@ class TaskUpdate(BaseModel):
     title: str = Field(None, min_length=1)
     done: bool = Field(None)
 
-app = FastAPI()
+app = FastAPI(title="Todo API with Supabase Auth")
 
 def get_db_connection():
     # Will raise psycopg.OperationalError if database is unreachable
