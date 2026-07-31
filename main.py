@@ -59,6 +59,24 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+# --- AUTHORIZATION DEPENDENCY (403 FORBIDDEN GUARD) ---
+def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    """
+    Checks if the authenticated user has an 'admin' role in user_metadata or app_metadata.
+    Returns 403 Forbidden if they are not an admin.
+    """
+    user_metadata = user.get("user_metadata", {})
+    app_metadata = user.get("app_metadata", {})
+    
+    role = user_metadata.get("role") or app_metadata.get("role") or user.get("role")
+
+    if role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Admin access required."
+        )
+    return user
+
 def get_db_connection():
     return psycopg.connect(DATABASE_URL, row_factory=dict_row, connect_timeout=2)
 
@@ -117,6 +135,19 @@ def get_profile(user: dict = Depends(get_current_user)):
         "id": user.get("sub"),
         "email": user.get("email"),
         "created_at": user.get("iat")
+    }
+
+# --- ADMIN ROUTE (RBAC) ---
+
+@app.get("/admin/users", status_code=status.HTTP_200_OK)
+def list_admin_users(admin: dict = Depends(require_admin)):
+    """
+    Restricted endpoint: Requires an authenticated user with an 'admin' role.
+    """
+    return {
+        "message": "Welcome to the admin dashboard!",
+        "admin_id": admin.get("sub"),
+        "system_status": "All systems operational"
     }
 
 # --- PROTECTED TASK ROUTES ---

@@ -18,6 +18,7 @@ A simple REST API built with **Python**, **FastAPI**, **PostgreSQL**, **Docker**
 - ✅ User signup and login integration using Supabase Auth
 - ✅ JWT bearer token middleware protecting tasks and profile routes
 - ✅ User isolation ensuring users only see their own tasks
+- ✅ Role-Based Access Control (RBAC): enforcing $403\text{ Forbidden}$ permissions for admin-only endpoints
 
 ---
 
@@ -35,20 +36,30 @@ A simple REST API built with **Python**, **FastAPI**, **PostgreSQL**, **Docker**
 
 ## API Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | API information |
-| POST | `/auth/signup` | Register a new user account |
-| POST | `/auth/login` | Log in and receive JWT access token |
-| POST | `/auth/logout` | Log out current session |
-| GET | `/protected/profile` | Retrieve current authenticated user metadata |
-| GET | `/health` | Health check (verifies database connectivity) |
-| GET | `/tasks` | List all tasks for the logged-in user |
-| GET | `/tasks/{id}` | Retrieve a task by ID |
-| POST | `/tasks` | Create a task assigned to current user |
-| PUT | `/tasks/{id}` | Update a task |
-| DELETE | `/tasks/{id}` | Delete a task |
-| POST | `/reset` | Wipe all tasks and re-seed example tasks |
+| Method | Endpoint | Auth Required | Description |
+| :---: | :--- | :---: | :--- |
+| `GET` | `/` | ❌ No | API information |
+| `POST` | `/auth/signup` | ❌ No | Register a new user account |
+| `POST` | `/auth/login` | ❌ No | Log in and receive JWT access token |
+| `POST` | `/auth/logout` | 🔒 Yes | Log out current session |
+| `GET` | `/protected/profile` | 🔒 Yes | Retrieve current authenticated user metadata |
+| `GET` | `/admin/users` | 🔒 Yes (Admin) | Restricted admin route listing system status ($403$ for non-admins) |
+| `GET` | `/health` | ❌ No | Health check (verifies database connectivity) |
+| `GET` | `/tasks` | 🔒 Yes | List all tasks for the logged-in user |
+| `GET` | `/tasks/{id}` | 🔒 Yes | Retrieve a task by ID |
+| `POST` | `/tasks` | 🔒 Yes | Create a task assigned to current user |
+| `PUT` | `/tasks/{id}` | 🔒 Yes | Update a task |
+| `DELETE` | `/tasks/{id}` | 🔒 Yes | Delete a task |
+| `POST` | `/reset` | ❌ No | Wipe all tasks and re-seed example tasks |
+
+---
+
+## Authorization & Role-Based Access Control (RBAC)
+
+The API distinguishes between **Authentication** (who you are) and **Authorization** (what you are allowed to do):
+
+- **`401 Unauthorized`**: Returned when a request is missing a valid JWT bearer token or the token is expired (*"I don't know who you are"*).
+- **`403 Forbidden`**: Returned when an authenticated user attempts to access an endpoint like `GET /admin/users` without having `"role": "admin"` inside their Supabase `user_metadata` (*"I know who you are, but you don't have permission"*).
 
 ---
 
