@@ -271,6 +271,7 @@ todo-api/
 ├── ai-version/
 │   ├── main.py
 │   └── requirements.txt
+│   └── .env.example
 ├── README.md
 ├── requirements.txt
 ├── swagger.png
@@ -319,36 +320,61 @@ I also verified that changes made directly in the SQLite database were immediate
 
 ---
 
-## AI vs me
-
-For Stage 6, I asked Claude to migrate my original in-memory FastAPI task API to use SQLite while keeping the API behavior the same. I placed the AI-generated version in the `ai-version/main.py` folder so it could be compared with my hand-written implementation.
+## AI vs Me (Stage 7 Code Review)
 
 **My prompt:**
 
-> Convert my existing FastAPI task API from using an in-memory Python list to using SQLite. Use Python's built-in `sqlite3` module. Create a `tasks` table with `id`, `title`, and `done` columns if it doesn't exist, and seed three example tasks only if the table is empty. Keep the same CRUD endpoints and preserve the existing API behavior, including the same HTTP status codes (`201`, `200`, `204`, `400`, `404`) and JSON error responses. Use parameterized SQL queries (? placeholders) for safety. Store task data in `tasks.db` so it survives server restarts.
+> "Build a production-ready REST API using Python, FastAPI, PostgreSQL, and Supabase Auth for a task management application.
+> 
+> Technical Specifications:
+> 1. Stack: FastAPI, PostgreSQL using psycopg3 with connection pooling (`psycopg_pool`), `python-dotenv`. Read `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_KEY`, and `SUPABASE_JWT_SECRET`. Auto-create a `tasks` table on startup.
+> 2. Auth & Middleware: Identity Provider is Supabase Auth with JWT Bearer Token validation. Implement a FastAPI security dependency using `HTTPBearer` that extracts the token from `Authorization: Bearer <token>`. Verify using PyJWT against `SUPABASE_JWT_SECRET` (algorithms HS256/ES256, audience `authenticated`). Return `401 Unauthorized` with `{"detail": "Invalid or expired authentication token"}` and `WWW-Authenticate: Bearer` on missing/invalid tokens. Extract `sub` claim for user data isolation.
+> 3. Endpoints:
+>    - `GET /`: Public root (`200 OK`).
+>    - `POST /auth/signup`: Body `{email, password}` via Supabase (`201 Created`).
+>    - `POST /auth/login`: Authenticate with Supabase (`200 OK`).
+>    - `POST /auth/logout`: Protected (`204 No Content`).
+>    - `GET /protected/profile`: Protected, returns user metadata (`200 OK`).
+>    - `GET /tasks`: List current user's tasks (`200 OK`).
+>    - `GET /tasks/{id}`: Get single task owned by user (`200 OK` / `404 Not Found`).
+>    - `POST /tasks`: Create task for current user (`201 Created`, `400 Bad Request` if title empty).
+>    - `PUT /tasks/{id}`: Update task if owned (`200 OK` / `404 Not Found`).
+>    - `DELETE /tasks/{id}`: Delete task if owned (`204 No Content` / `404 Not Found`).
+> 4. OpenAPI Setup: Configure `HTTPBearer` scheme so Swagger UI `/docs` has an active "Authorize" button."
 
-**Running it:** The generated application started successfully, automatically created `tasks.db`, seeded the database only once, and preserved data after restarting the server. I tested all CRUD endpoints and confirmed that task creation, retrieval, updating, deletion, and persistence behaved correctly.
+---
 
-**What it did better:**
+### Code Review & Comparison Answers
 
-- It created helper functions (`get_conn()`, `init_db()`, and `row_to_task()`) that made the database code cleaner and easier to maintain.
-- It consistently used parameterized SQL queries, improving readability and preventing SQL injection.
-- It converted the SQLite integer values (`0` and `1`) into Python booleans before returning JSON responses, keeping the API output clean.
-- During the rematch, Claude improved the implementation by using a single shared SQLite connection protected by a thread lock instead of opening and closing a database connection for every request. This reduced repeated connection overhead while remaining thread-safe.
+#### 1. Token Extraction Handling
+- **Claude's Implementation:** Claude leveraged FastAPI's built-in `HTTPBearer(auto_error=False)` dependency scheme (`bearer_scheme`). 
+- **Header Parsing:** `HTTPBearer` handles stripping the `"Bearer "` prefix automatically and returns an `HTTPAuthorizationCredentials` object containing just the token string.
+- **Malformed Headers:** If a request is sent without a token or with a malformed header (e.g., `Authorization: badtoken` without the prefix), `HTTPBearer(auto_error=False)` sets `credentials = None`. Claude's guard explicitly checks `if credentials is None` and raises a clean `401 Unauthorized`. Malformed headers do not crash the application.
 
-**What it got wrong or quietly ignored:**
+#### 2. Security Flaws & Risks
+- **Audience Verification Fallback (Risk):** Claude introduced a fallback mechanism inside `get_current_user`: if JWT decoding fails due to an audience mismatch, it retries decoding with `verify_aud=False`. While convenient for testing across different Supabase setups, skipping audience validation in production opens the API to accepting tokens issued for different apps or services sharing the same JWT secret.
+- **Blocking Connection Pool in Async Endpoints (Performance/Security Risk):** Claude set up a synchronous `ConnectionPool` (`psycopg_pool.ConnectionPool`) inside `async def` route handlers instead of using `AsyncConnectionPool`. Executing synchronous database calls directly inside `async` route functions blocks FastAPI's event loop, creating a potential Denial of Service (DoS) risk under concurrent traffic.
+- **Service Role / Token Logging:** Claude handled secrets safely by loading `SUPABASE_KEY` and `SUPABASE_JWT_SECRET` via environment variables. It did not leak keys or log sensitive raw tokens in print/logging statements.
 
-- It preserved additional endpoints from the original AI version (`/stats`, `/reset`, and task filtering), even though they were not required by the assignment specification.
-- It seeded different example tasks ("Buy milk" and "Write README") instead of matching the sample data from my project.
-- It did not generate a `requirements.txt` file even though the original AI project included one.
+#### 3. What the Prompt Forgot vs. What the AI Decided
+- **What the prompt forgot to specify:** 
+  - Whether database access should be synchronous or asynchronous.
+  - Specific exception details returned by Supabase Auth on failed logins.
+  - How to handle Supabase JWTs that omit the default `authenticated` audience claim.
+- **What the AI silently decided:**
+  - Used `httpx.AsyncClient()` dynamically inside endpoint functions rather than instantiating a persistent shared HTTP client.
+  - Implemented a custom global `http_exception_handler` for `HTTPException` to enforce uniform JSON error payloads across all routes.
+  - Decided to retry JWT verification with `verify_aud=False` if the first verification step failed.
 
-**What my prompt forgot to specify:**
+---
 
-- My prompt described the required SQLite migration but did not specify how database connections should be managed, whether helper functions should be created, or whether the original sample tasks needed to remain exactly the same. Because those details were omitted, Claude made its own implementation decisions.
+### Rematch & Prompt Iteration
 
-**One rematch:**
+**Iterated Prompt Additions:**
+> "Use `AsyncConnectionPool` with `async with` connection contexts for all database endpoints, and enforce strict JWT audience verification against `authenticated` without falling back to unverified audience claims."
 
-After reviewing the generated code, I refined my prompt to request a single shared SQLite connection instead of opening and closing a connection for every request. The regenerated version replaced the repeated connection logic with one shared connection protected by a thread lock, producing cleaner and more efficient database access.
+**Outcome:**
+Adding explicit async database execution rules eliminated event-loop blocking on PostgreSQL queries and forced the AI to enforce strict JWT audience validation, preventing potential cross-service token reuse.
 
 ---
 
