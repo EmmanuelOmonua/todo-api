@@ -10,14 +10,16 @@ from fastapi import FastAPI, status, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, ValidationError
 from dotenv import load_dotenv
 from supabase import create_client, Client
 import jwt
 from jwt.exceptions import PyJWTError
 
 from src.llm.schema import EnrichRequest, EnrichResponse, CategoryEnum
-from src.llm.client import call_llm_raw
+from src.llm.client import call_llm_raw, call_llm_repair
+from src.llm.parser import parse_and_validate
+from src.llm.quarantine import quarantine_payload
 
 load_dotenv()
 
@@ -135,7 +137,7 @@ def read_root():
 
 # --- LLM ENRICHMENT ROUTE ---
 
-@app.post("/enrich")
+@app.post("/enrich", response_model=EnrichResponse)
 def enrich_content(payload: EnrichRequest):
     stub_mode = os.getenv("LLM_STUB", "1") == "1"
     
@@ -147,9 +149,31 @@ def enrich_content(payload: EnrichRequest):
             confidence=0.95
         )
     
-    # Stage 2: Call model with versioned prompt
+    # Initial LLM Call
     raw_output = call_llm_raw(payload.content)
-    return {"raw_response": raw_output}
+    
+    # Attempt 1: Parse & Validate
+    try:
+        return parse_and_validate(raw_output)
+    except (json.JSONDecodeError, ValidationError) as err1:
+        error_details = str(err1)
+        
+    # Attempt 2: Repair Retry Loop (1x)
+    repair_output = call_llm_repair(payload.content, raw_output, error_details)
+    try:
+        return parse_and_validate(repair_output)
+    except (json.JSONDecodeError, ValidationError) as err2:
+        # Both attempts failed: Quarantine & return 422
+        quarantine_payload(
+            content=payload.content,
+            raw_output=raw_output,
+            repair_output=repair_output,
+            error_msg=str(err2)
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Model output failed validation after repair retry. Recorded to quarantine."
+        )
 
 # --- PROTECTED PROFILE ROUTE ---
 
