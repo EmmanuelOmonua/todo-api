@@ -16,12 +16,17 @@ from supabase import create_client, Client
 import jwt
 from jwt.exceptions import PyJWTError
 
+from src.llm.schema import EnrichRequest, EnrichResponse, CategoryEnum
+
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
+
+# LLM Control Flags
+LLM_STUB = os.getenv("LLM_STUB", "1") == "1"
 
 if not DATABASE_URL or not SUPABASE_URL or not SUPABASE_KEY or not SUPABASE_JWT_SECRET:
     print("FATAL ERROR: Missing required environment variables.", file=sys.stderr)
@@ -103,8 +108,8 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(
-    title="Todo API with Supabase Auth",
-    description="Interactive REST API built with FastAPI, PostgreSQL, and Supabase JWT authentication.",
+    title="Todo API with Supabase Auth & LLM Enrichment",
+    description="Interactive REST API built with FastAPI, PostgreSQL, Supabase JWT auth, and Ollama LLM.",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -120,12 +125,29 @@ async def db_exception_handler(request, exc):
 async def validation_exception_handler(request, exc):
     return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
-        content={"error": "Invalid or missing task title"}
+        content={"error": "Invalid input payload standard validation error"}
     )
 
 @app.get("/")
 def read_root():
     return {"name": "Task API", "version": "1.0"}
+
+# --- LLM ENRICHMENT ROUTE ---
+
+@app.post("/enrich", response_model=EnrichResponse)
+async def enrich_content(payload: EnrichRequest):
+    if LLM_STUB:
+        return EnrichResponse(
+            category=CategoryEnum.TECH,
+            summary="This is a stubbed summary of the scraped content.",
+            quality_flags=["stub_data"],
+            confidence=0.95
+        )
+    
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Real model execution arrives in Stage 2."
+    )
 
 # --- PROTECTED PROFILE ROUTE ---
 
