@@ -17,6 +17,7 @@ import jwt
 from jwt.exceptions import PyJWTError
 
 from src.llm.schema import EnrichRequest, EnrichResponse, CategoryEnum
+from src.llm.client import enrich_content_with_llm
 
 load_dotenv()
 
@@ -136,7 +137,10 @@ def read_root():
 
 @app.post("/enrich", response_model=EnrichResponse)
 async def enrich_content(payload: EnrichRequest):
-    if LLM_STUB:
+    # Check LLM_STUB flag dynamically per request
+    stub_mode = os.getenv("LLM_STUB", "1") == "1"
+    
+    if stub_mode:
         return EnrichResponse(
             category=CategoryEnum.TECH,
             summary="This is a stubbed summary of the scraped content.",
@@ -144,10 +148,7 @@ async def enrich_content(payload: EnrichRequest):
             confidence=0.95
         )
     
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Real model execution arrives in Stage 2."
-    )
+    return enrich_content_with_llm(payload)
 
 # --- PROTECTED PROFILE ROUTE ---
 
