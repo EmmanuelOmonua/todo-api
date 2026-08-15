@@ -17,7 +17,7 @@ import jwt
 from jwt.exceptions import PyJWTError
 
 from src.llm.schema import EnrichRequest, EnrichResponse, CategoryEnum
-from src.llm.client import enrich_content_with_llm
+from src.llm.client import call_llm_raw
 
 load_dotenv()
 
@@ -135,9 +135,8 @@ def read_root():
 
 # --- LLM ENRICHMENT ROUTE ---
 
-@app.post("/enrich", response_model=EnrichResponse)
-async def enrich_content(payload: EnrichRequest):
-    # Check LLM_STUB flag dynamically per request
+@app.post("/enrich")
+def enrich_content(payload: EnrichRequest):
     stub_mode = os.getenv("LLM_STUB", "1") == "1"
     
     if stub_mode:
@@ -148,7 +147,9 @@ async def enrich_content(payload: EnrichRequest):
             confidence=0.95
         )
     
-    return enrich_content_with_llm(payload)
+    # Stage 2: Call model with versioned prompt
+    raw_output = call_llm_raw(payload.content)
+    return {"raw_response": raw_output}
 
 # --- PROTECTED PROFILE ROUTE ---
 
