@@ -1,0 +1,50 @@
+[
+  {
+    "id": "case_1_standard_todo",
+    "input": "Buy groceries tomorrow at 5 PM including milk, eggs, and bread.",
+    "expected_category": "personal",
+    "description": "Standard actionable shopping task"
+  },
+  {
+    "id": "case_2_meeting_note",
+    "input": "Sync with Sarah on Thursday regarding Q3 budget allocation.",
+    "expected_category": "work",
+    "description": "Meeting scheduling note"
+  },
+  {
+    "id": "case_3_technical_note",
+    "input": "PostgreSQL 16 introduces improvements to query performance and logical replication.",
+    "expected_category": "tech",
+    "description": "Technical factual note"
+  },
+  {
+    "id": "case_4_bug_report",
+    "input": "Fix memory leak in background worker queue when processing batch jobs.",
+    "expected_category": "tech",
+    "description": "Software bug task"
+  },
+  {
+    "id": "case_5_learning_resource",
+    "input": "Read paper on Retrieval-Augmented Generation evaluation metrics.",
+    "expected_category": "tech",
+    "description": "Technical learning resource"
+  },
+  {
+    "id": "case_6_project_idea",
+    "input": "We should consider building a lightweight API proxy for LLM observability.",
+    "expected_category": "tech",
+    "description": "Technical feature idea"
+  },
+  {
+    "id": "case_7_ambiguous",
+    "input": "Something about servers and maybe checking logs later.",
+    "expected_category": "tech",
+    "description": "Ambiguous technical note"
+  },
+  {
+    "id": "case_8_unsure_rule",
+    "input": "asdfjkl; 12345 ???",
+    "expected_category": "other",
+    "description": "Gibberish input triggering fallback rule"
+  }
+]
