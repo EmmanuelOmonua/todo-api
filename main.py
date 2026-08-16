@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 from typing import Optional
 from contextlib import asynccontextmanager
 
@@ -15,11 +16,13 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 import jwt
 from jwt.exceptions import PyJWTError
+from openai import APITimeoutError, APIStatusError
 
 from src.llm.schema import EnrichRequest, EnrichResponse, CategoryEnum
 from src.llm.client import call_llm_raw, call_llm_repair
 from src.llm.parser import parse_and_validate
 from src.llm.quarantine import quarantine_payload
+from src.llm.logger import log_llm_call
 
 load_dotenv()
 
@@ -139,8 +142,16 @@ def read_root():
 
 @app.post("/enrich", response_model=EnrichResponse)
 def enrich_content(payload: EnrichRequest):
+    # 1. Kill Switch Check
+    llm_enabled = os.getenv("LLM_ENABLED", "true").lower() in ("true", "1")
+    if not llm_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM enrichment service is currently disabled."
+        )
+
+    # 2. Stub Mode Check
     stub_mode = os.getenv("LLM_STUB", "1") == "1"
-    
     if stub_mode:
         return EnrichResponse(
             category=CategoryEnum.TECH,
@@ -148,31 +159,48 @@ def enrich_content(payload: EnrichRequest):
             quality_flags=["stub_data"],
             confidence=0.95
         )
-    
-    # Initial LLM Call
-    raw_output = call_llm_raw(payload.content)
-    
-    # Attempt 1: Parse & Validate
+
     try:
-        return parse_and_validate(raw_output)
-    except (json.JSONDecodeError, ValidationError) as err1:
-        error_details = str(err1)
+        # Initial Call
+        raw_output, metrics = call_llm_raw(payload.content)
         
-    # Attempt 2: Repair Retry Loop (1x)
-    repair_output = call_llm_repair(payload.content, raw_output, error_details)
-    try:
-        return parse_and_validate(repair_output)
-    except (json.JSONDecodeError, ValidationError) as err2:
-        # Both attempts failed: Quarantine & return 422
-        quarantine_payload(
-            content=payload.content,
-            raw_output=raw_output,
-            repair_output=repair_output,
-            error_msg=str(err2)
-        )
+        # Attempt 1: Parse & Validate
+        try:
+            response_obj = parse_and_validate(raw_output)
+            log_llm_call(metrics, repaired=False, success=True)
+            return response_obj
+        except (json.JSONDecodeError, Exception) as err1:
+            error_details = str(err1)
+
+        # Attempt 2: Repair Retry
+        repair_output, repair_metrics = call_llm_repair(payload.content, raw_output, error_details)
+        try:
+            response_obj = parse_and_validate(repair_output)
+            log_llm_call(repair_metrics, repaired=True, success=True)
+            return response_obj
+        except (json.JSONDecodeError, Exception) as err2:
+            log_llm_call(repair_metrics, repaired=True, success=False)
+            quarantine_payload(
+                content=payload.content,
+                raw_output=raw_output,
+                repair_output=repair_output,
+                error_msg=str(err2)
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Model output failed validation after repair retry. Recorded to quarantine."
+            )
+
+    except APITimeoutError:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Model output failed validation after repair retry. Recorded to quarantine."
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="LLM provider request timed out (30s limit)."
+        )
+    except APIStatusError as e:
+        # Non-retryable client errors (401, 403, 400) should return immediate error without retries
+        raise HTTPException(
+            status_code=e.status_code if e.status_code in (401, 403, 400) else status.HTTP_502_BAD_GATEWAY,
+            detail=f"LLM Provider error: {e.message}"
         )
 
 # --- PROTECTED PROFILE ROUTE ---

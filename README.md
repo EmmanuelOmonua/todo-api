@@ -199,7 +199,7 @@ On startup, the application automatically:
 
 Because Postgres is now a separate service from the API (rather than a single file the process reads and writes directly, like SQLite was), the database can be restarted or rebuilt independently of the API, and the API simply reconnects to it rather than losing data along with an in-process file.
 
-### Verifying persistence (Stage 5 checkpoint)
+### Verifying persistence
 
 To confirm data survives a restart of the whole stack:
 
@@ -288,7 +288,7 @@ todo-api/
 
 ![Swagger UI](swagger.png)
 
-### Database contents (Stage 5)
+### Database contents 
 
 Screenshot showing the seeded/created rows in Postgres, taken with either `psql` (`\dt` + a `SELECT * FROM tasks;`) or a GUI client like DBeaver, pgAdmin, or TablePlus:
 
@@ -311,6 +311,10 @@ SELECT COUNT(*) FROM tasks;
 ## SQLite Database
 
 ![SQLite Database](sqlite-browser.png)
+
+## LLM Retry Policy
+- Uses custom application-level exponential backoff retry loop (max 2 retries on timeouts, 429 rate limits, and 5xx server errors) with `max_retries=0` configured on the OpenAI SDK client.
+- Non-retryable status codes (`400`, `401`, `403`) fail immediately without retrying.
 
 ### Result
 
