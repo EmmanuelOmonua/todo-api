@@ -138,6 +138,11 @@ async def validation_exception_handler(request, exc):
 def read_root():
     return {"name": "Task API", "version": "1.0"}
 
+# --- STAGE 0 HEALTH CHECK ROUTE ---
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
 # --- LLM ENRICHMENT ROUTE ---
 
 @app.post("/enrich", response_model=EnrichResponse)
