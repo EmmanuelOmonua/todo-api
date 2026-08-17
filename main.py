@@ -1,8 +1,10 @@
 import os
 import sys
 import json
-from typing import Optional
+import uuid
+from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
 import psycopg
 import asyncio
@@ -17,7 +19,6 @@ from supabase import create_client, Client
 import jwt
 from jwt.exceptions import PyJWTError
 from openai import APITimeoutError, APIStatusError
-from datetime import timedelta
 
 # --- INNGEST IMPORTS ---
 import inngest
@@ -46,6 +47,32 @@ if not DATABASE_URL or not SUPABASE_URL or not SUPABASE_KEY or not SUPABASE_JWT_
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 security = HTTPBearer()
 
+# --- IN-MEMORY REPORT STORE ---
+reports_db: Dict[str, Dict[str, Any]] = {}
+
+
+# --- SCHEMAS ---
+class ReportCreateRequest(BaseModel):
+    topic: str = Field(..., min_length=1)
+
+class ReportResponse(BaseModel):
+    id: str
+    status: str
+    topic: str
+    result: Optional[Dict[str, Any]] = None
+
+class TaskCreate(BaseModel):
+    title: str = Field(..., min_length=1)
+
+class TaskUpdate(BaseModel):
+    title: Optional[str] = Field(None, min_length=1)
+    done: Optional[bool] = None
+
+class UserAuth(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=6)
+
+
 # --- INNGEST CLIENT SETUP ---
 inngest_client = inngest.Inngest(app_id="report-api")
 
@@ -60,16 +87,30 @@ async def say_hello(ctx: inngest.Context):
     return "Hello from the background!"
 
 
-class TaskCreate(BaseModel):
-    title: str = Field(..., min_length=1)
+@inngest_client.create_function(
+    fn_id="make-report",
+    trigger=inngest.TriggerEvent(event="report/requested"),
+)
+async def make_report(ctx: inngest.Context):
+    report_id = ctx.event.data.get("report_id")
+    topic = ctx.event.data.get("topic", "General")
 
-class TaskUpdate(BaseModel):
-    title: Optional[str] = Field(None, min_length=1)
-    done: Optional[bool] = None
+    # Step 1: Stand-in for slow task (8s sleep)
+    await ctx.step.sleep("do-the-slow-work", timedelta(seconds=8))
 
-class UserAuth(BaseModel):
-    email: EmailStr
-    password: str = Field(..., min_length=6)
+    # Step 2: Build report and update map status to "done"
+    async def build_report():
+        if report_id in reports_db:
+            reports_db[report_id]["status"] = "done"
+            reports_db[report_id]["result"] = {
+                "summary": f"Completed automated analysis for topic: '{topic}'.",
+                "insights": ["Key metric A looks stable", "Key metric B increased by 14%"],
+                "generated_at": "2026-08-17"
+            }
+    await ctx.step.run("build-report", build_report)
+
+    return {"status": "done", "report_id": report_id}
+
 
 # --- REUSABLE AUTH DEPENDENCY (MIDDLEWARE) ---
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
@@ -139,7 +180,7 @@ app = FastAPI(
 inngest.fast_api.serve(
     app,
     inngest_client,
-    [say_hello],
+    [say_hello, make_report],
 )
 
 @app.exception_handler(psycopg.OperationalError)
@@ -164,6 +205,41 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+# --- REPORT ENDPOINTS (STAGE 2) ---
+@app.post("/reports", status_code=status.HTTP_202_ACCEPTED, response_model=ReportResponse)
+async def create_report(payload: ReportCreateRequest):
+    report_id = str(uuid.uuid4())
+    
+    # Store initial pending state
+    reports_db[report_id] = {
+        "id": report_id,
+        "topic": payload.topic,
+        "status": "pending",
+        "result": None
+    }
+
+    # Dispatch background event
+    await inngest_client.send(
+        inngest.Event(
+            name="report/requested",
+            data={"report_id": report_id, "topic": payload.topic}
+        )
+    )
+
+    return reports_db[report_id]
+
+
+@app.get("/reports/{report_id}", response_model=ReportResponse)
+def get_report_status(report_id: str):
+    if report_id not in reports_db:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Report with ID '{report_id}' not found."
+        )
+    return reports_db[report_id]
+
 
 # --- LLM ENRICHMENT ROUTE ---
 @app.post("/enrich", response_model=EnrichResponse)
