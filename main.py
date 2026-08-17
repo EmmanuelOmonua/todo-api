@@ -13,7 +13,7 @@ from fastapi import FastAPI, status, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field, EmailStr, ValidationError
+from pydantic import BaseModel, Field, EmailStr, ValidationError, field_validator
 from dotenv import load_dotenv
 from supabase import create_client, Client
 import jwt
@@ -55,6 +55,13 @@ reports_db: Dict[str, Dict[str, Any]] = {}
 class ReportCreateRequest(BaseModel):
     topic: str = Field(..., min_length=1)
 
+    @field_validator("topic")
+    @classmethod
+    def validate_topic_not_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Topic cannot be empty or whitespace.")
+        return v.strip()
+
 class ReportResponse(BaseModel):
     id: str
     status: str
@@ -90,10 +97,15 @@ async def say_hello(ctx: inngest.Context):
 @inngest_client.create_function(
     fn_id="make-report",
     trigger=inngest.TriggerEvent(event="report/requested"),
+    retries=2,
 )
 async def make_report(ctx: inngest.Context):
     report_id = ctx.event.data.get("report_id")
     topic = ctx.event.data.get("topic", "General")
+
+    # Stage 3 requirement: Simulate failure to test retries and backoff
+    if topic and topic.strip().lower() == "fail":
+        raise RuntimeError(f"Simulated background job failure for topic: '{topic}'")
 
     # Step 1: Stand-in for slow task (8s sleep)
     await ctx.step.sleep("do-the-slow-work", timedelta(seconds=8))
@@ -207,7 +219,7 @@ def health_check():
     return {"status": "ok"}
 
 
-# --- REPORT ENDPOINTS (STAGE 2) ---
+# --- REPORT ENDPOINTS (STAGE 2 & STAGE 3) ---
 @app.post("/reports", status_code=status.HTTP_202_ACCEPTED, response_model=ReportResponse)
 async def create_report(payload: ReportCreateRequest):
     report_id = str(uuid.uuid4())
