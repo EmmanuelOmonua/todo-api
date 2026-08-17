@@ -17,6 +17,11 @@ from supabase import create_client, Client
 import jwt
 from jwt.exceptions import PyJWTError
 from openai import APITimeoutError, APIStatusError
+from datetime import timedelta
+
+# --- INNGEST IMPORTS ---
+import inngest
+import inngest.fast_api
 
 from src.llm.schema import EnrichRequest, EnrichResponse, CategoryEnum
 from src.llm.client import call_llm_raw, call_llm_repair
@@ -40,6 +45,20 @@ if not DATABASE_URL or not SUPABASE_URL or not SUPABASE_KEY or not SUPABASE_JWT_
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 security = HTTPBearer()
+
+# --- INNGEST CLIENT SETUP ---
+inngest_client = inngest.Inngest(app_id="report-api")
+
+
+# --- INNGEST FUNCTIONS ---
+@inngest_client.create_function(
+    fn_id="say-hello",
+    trigger=inngest.TriggerEvent(event="test/hello"),
+)
+async def say_hello(ctx: inngest.Context):
+    await ctx.step.sleep("wait-a-bit", timedelta(seconds=5))
+    return "Hello from the background!"
+
 
 class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1)
@@ -72,10 +91,6 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 
 # --- AUTHORIZATION DEPENDENCY (403 FORBIDDEN GUARD) ---
 def require_admin(user: dict = Depends(get_current_user)) -> dict:
-    """
-    Checks if the authenticated user has an 'admin' role in user_metadata or app_metadata.
-    Returns 403 Forbidden if they are not an admin.
-    """
     user_metadata = user.get("user_metadata", {})
     app_metadata = user.get("app_metadata", {})
     
@@ -120,6 +135,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# --- SERVE INNGEST AT /api/inngest ---
+inngest.fast_api.serve(
+    app,
+    inngest_client,
+    [say_hello],
+)
+
 @app.exception_handler(psycopg.OperationalError)
 async def db_exception_handler(request, exc):
     return JSONResponse(
@@ -144,10 +166,8 @@ def health_check():
     return {"status": "ok"}
 
 # --- LLM ENRICHMENT ROUTE ---
-
 @app.post("/enrich", response_model=EnrichResponse)
 def enrich_content(payload: EnrichRequest):
-    # 1. Kill Switch Check
     llm_enabled = os.getenv("LLM_ENABLED", "true").lower() in ("true", "1")
     if not llm_enabled:
         raise HTTPException(
@@ -155,7 +175,6 @@ def enrich_content(payload: EnrichRequest):
             detail="LLM enrichment service is currently disabled."
         )
 
-    # 2. Stub Mode Check
     stub_mode = os.getenv("LLM_STUB", "1") == "1"
     if stub_mode:
         return EnrichResponse(
@@ -166,10 +185,8 @@ def enrich_content(payload: EnrichRequest):
         )
 
     try:
-        # Initial Call
         raw_output, metrics = call_llm_raw(payload.content)
         
-        # Attempt 1: Parse & Validate
         try:
             response_obj = parse_and_validate(raw_output)
             log_llm_call(metrics, repaired=False, success=True)
@@ -177,7 +194,6 @@ def enrich_content(payload: EnrichRequest):
         except (json.JSONDecodeError, Exception) as err1:
             error_details = str(err1)
 
-        # Attempt 2: Repair Retry
         repair_output, repair_metrics = call_llm_repair(payload.content, raw_output, error_details)
         try:
             response_obj = parse_and_validate(repair_output)
@@ -202,14 +218,12 @@ def enrich_content(payload: EnrichRequest):
             detail="LLM provider request timed out (30s limit)."
         )
     except APIStatusError as e:
-        # Non-retryable client errors (401, 403, 400) should return immediate error without retries
         raise HTTPException(
             status_code=e.status_code if e.status_code in (401, 403, 400) else status.HTTP_502_BAD_GATEWAY,
             detail=f"LLM Provider error: {e.message}"
         )
 
 # --- PROTECTED PROFILE ROUTE ---
-
 @app.get("/protected/profile")
 def get_profile(user: dict = Depends(get_current_user)):
     return {
@@ -219,12 +233,8 @@ def get_profile(user: dict = Depends(get_current_user)):
     }
 
 # --- ADMIN ROUTE (RBAC) ---
-
 @app.get("/admin/users", status_code=status.HTTP_200_OK)
 def list_admin_users(admin: dict = Depends(require_admin)):
-    """
-    Restricted endpoint: Requires an authenticated user with an 'admin' role.
-    """
     return {
         "message": "Welcome to the admin dashboard!",
         "admin_id": admin.get("sub"),
@@ -232,7 +242,6 @@ def list_admin_users(admin: dict = Depends(require_admin)):
     }
 
 # --- PROTECTED TASK ROUTES ---
-
 @app.get("/tasks")
 def get_tasks(user: dict = Depends(get_current_user)):
     user_id = user.get("sub")
@@ -289,7 +298,6 @@ def delete_task(task_id: int, user: dict = Depends(get_current_user)):
         conn.commit()
 
 # --- AUTH ROUTES ---
-
 @app.post("/auth/signup", status_code=status.HTTP_201_CREATED)
 def signup(credentials: UserAuth):
     try:
