@@ -247,6 +247,89 @@ At 10,000 requests/day averaging 150 prompt tokens and 50 completion tokens per 
 #### What I'd Fix With Another Day
 With another day, I would refine the prompt instructions to better distinguish personal/work task contexts from financial/technical topics, and enforce strict JSON schema compliance at the model layer using Pydantic-AI or `instructor`.
 
+---
+
+## Background Jobs & Async Processing (Inngest)
+
+An asynchronous background job pipeline built with **Inngest** and **FastAPI** to offload long-running report generation tasks, manage status polling, and execute scheduled cron jobs.
+
+### How to Run
+
+Running the background job system requires two terminal commands:
+
+1. **Start the API Server:**
+   ```bash
+   uvicorn main:app --reload
+   ```
+
+2. **Start the Inngest Server:**
+   ```bash
+   npx inngest-cli@latest dev
+   ```
+
+### Endpoints & Inngest Functions
+
+| Type | Name/Route | Description |
+| :---: | :--- | :---: |
+| Endpoint | `POST /reports` | Accepts a topic and triggers asynchronous report generation (`202 Accepted`) |
+| Endpoint | `GET /reports/{id}` | Polls status (`pending`, `done`, `failed`) and retrieves completed report output |
+| Endpoint | `POST /reports/{id}/cancel` | Cancels an active background report generation task |
+| Function | `make_report` | Event-driven background function processing long-running report tasks |
+| Function | `heartbeat` | Cron function running every minute to log database status summary counts |
+| Function | `cancel_report` | Event-driven function handling background job cancellation |
+
+### Execution Proof (202 Accepted + Polling)
+
+```http
+POST /reports
+HTTP/1.1 202 Accepted
+Content-Type: application/json
+
+{
+  "job_id": "01J5K8X92M4P7Q3R1V8W90ZX1Y",
+  "status": "pending"
+}
+
+GET /reports/01J5K8X92M4P7Q3R1V8W90ZX1Y
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "job_id": "01J5K8X92M4P7Q3R1V8W90ZX1Y",
+  "status": "pending",
+  "result": null
+}
+
+GET /reports/01J5K8X92M4P7Q3R1V8W90ZX1Y
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "job_id": "01J5K8X92M4P7Q3R1V8W90ZX1Y",
+  "status": "done",
+  "result": "Report generated successfully for topic: Async Python"
+}
+```
+
+### LLM Retry Policy
+- Invalid input should fail fast with a 400 response before triggering a background job, whereas transient errors inside background jobs warrant automatic retries.
+- Uses custom application-level exponential backoff retry loop (max 2 retries on timeouts, 429 rate limits, and 5xx server errors) with `max_retries=0` configured on the OpenAI SDK client.
+- Non-retryable status codes (`400`, `401`, `403`) fail immediately without retrying.
+
+---
+
+### Cron Schedule Configuration
+- Daily at 08:00 UTC: The cron expression 0 8 * * * runs the job every day at 8:00 AM.
+- Every Sunday at 22:00 UTC: The cron expression 0 22 * * 0 (or 0 22 * * 7) runs the job every Sunday at 10:00 PM.
+
+---
+
+### Screenshot
+
+![Inngest Dashboard](inngest-dashboard.png)
+
+---
+
 ## API Documentation
 
 FastAPI automatically generates interactive documentation.
@@ -396,20 +479,6 @@ SELECT COUNT(*) FROM tasks;
 ## SQLite Database
 
 ![SQLite Database](sqlite-browser.png)
-
----
-
-## LLM Retry Policy
-- Invalid input should fail fast with a 400 response before triggering a background job, whereas transient errors inside background jobs warrant automatic retries.
-- Uses custom application-level exponential backoff retry loop (max 2 retries on timeouts, 429 rate limits, and 5xx server errors) with `max_retries=0` configured on the OpenAI SDK client.
-- Non-retryable status codes (`400`, `401`, `403`) fail immediately without retrying.
-
----
-
-## Cron Schedule Configuration
-
-- **Daily at 08:00 UTC**: The cron expression `0 8 * * *` runs the job every day at 8:00 AM.
-- **Every Sunday at 22:00 UTC**: The cron expression `0 22 * * 0` (or `0 22 * * 7`) runs the job every Sunday at 10:00 PM.
 
 ---
 
