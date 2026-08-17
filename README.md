@@ -397,9 +397,21 @@ SELECT COUNT(*) FROM tasks;
 
 ![SQLite Database](sqlite-browser.png)
 
+---
+
 ## LLM Retry Policy
+- Invalid input should fail fast with a 400 response before triggering a background job, whereas transient errors inside background jobs warrant automatic retries.
 - Uses custom application-level exponential backoff retry loop (max 2 retries on timeouts, 429 rate limits, and 5xx server errors) with `max_retries=0` configured on the OpenAI SDK client.
 - Non-retryable status codes (`400`, `401`, `403`) fail immediately without retrying.
+
+---
+
+## Cron Schedule Configuration
+
+- **Daily at 08:00 UTC**: The cron expression `0 8 * * *` runs the job every day at 8:00 AM.
+- **Every Sunday at 22:00 UTC**: The cron expression `0 22 * * 0` (or `0 22 * * 7`) runs the job every Sunday at 10:00 PM.
+
+---
 
 ### Result
 

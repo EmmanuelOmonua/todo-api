@@ -105,6 +105,8 @@ async def make_report(ctx: inngest.Context):
 
     # Stage 3 requirement: Simulate failure to test retries and backoff
     if topic and topic.strip().lower() == "fail":
+        if report_id in reports_db:
+            reports_db[report_id]["status"] = "failed"
         raise RuntimeError(f"Simulated background job failure for topic: '{topic}'")
 
     # Step 1: Stand-in for slow task (8s sleep)
@@ -122,6 +124,21 @@ async def make_report(ctx: inngest.Context):
     await ctx.step.run("build-report", build_report)
 
     return {"status": "done", "report_id": report_id}
+
+
+# Stage 4 requirement: Cron heartbeat function running every minute (* * * * *)
+@inngest_client.create_function(
+    fn_id="heartbeat",
+    trigger=inngest.TriggerCron(cron="* * * * *"),
+)
+async def heartbeat(ctx: inngest.Context):
+    pending = sum(1 for r in reports_db.values() if r.get("status") == "pending")
+    done = sum(1 for r in reports_db.values() if r.get("status") == "done")
+    failed = sum(1 for r in reports_db.values() if r.get("status") == "failed")
+
+    summary_line = f"Heartbeat Summary - Pending: {pending}, Done: {done}, Failed: {failed}"
+    print(summary_line)
+    return {"summary": summary_line, "pending": pending, "done": done, "failed": failed}
 
 
 # --- REUSABLE AUTH DEPENDENCY (MIDDLEWARE) ---
@@ -192,7 +209,7 @@ app = FastAPI(
 inngest.fast_api.serve(
     app,
     inngest_client,
-    [say_hello, make_report],
+    [say_hello, make_report, heartbeat],
 )
 
 @app.exception_handler(psycopg.OperationalError)
